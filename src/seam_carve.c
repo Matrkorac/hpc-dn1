@@ -9,7 +9,7 @@
 #include "stb_image_write.h"
 
 // Use 0 to retain the original number of color channels
-#define COLOR_CHANNELS 0
+#define COLOR_CHANNELS 0    
 
 void copy_image(unsigned char *image_out, const unsigned char *image_in, size_t size)
 {
@@ -208,6 +208,25 @@ void find_seam(float *energy, int *seam_index, int height, int width)
     }
 }
 
+void remove_seam(unsigned char *image, unsigned char *img_reduced, int *path, int height, int width, int cpp) 
+{
+    // tole zunanjo se da paralelizirat
+    for (int row = 0; row < height; row++) {
+        // notranje na žalost ne
+        for (int col = 0; col < width; col++) {
+            if (col < path[row]) {
+                img_reduced[row * width + col] = image[row * width + col];
+                img_reduced[(row * height) +  row * width + col] = image[(row * height) + row * width + col];
+                img_reduced[(2 * row * height) + row * width + col] = image[(2 * row * height) + row * width + col];
+            } else if (col > path[row]) {
+                img_reduced[row * (width - 1) + col - 1] = image[row * width + col];
+                img_reduced[(row * height) +  row * width + col - 1] = image[(row * height) + row * width + col];
+                img_reduced[(2 * row * height) + row * width + col - 1] = image[(2 * row * height) + row * width + col];
+            }
+        }
+    }
+}
+
 int main(int argc, char *argv[]) {
 
     if (argc < 3)
@@ -218,6 +237,8 @@ int main(int argc, char *argv[]) {
 
     char image_in_title[255];
     char image_out_title[255];
+    // TODO tole mora prit iz argumentov se mi zdi
+    int seams_to_remove = 32;
 
     snprintf(image_in_title, 255, "%s", argv[1]);
     snprintf(image_out_title, 255, "%s", argv[2]);
@@ -227,17 +248,35 @@ int main(int argc, char *argv[]) {
     int cpp;
     unsigned char *image_in = load_image(&height, &width, &cpp, image_in_title);
 
+    // tole mora bit sekvenčno
+    for (int i = 0; i < seams_to_remove; i++) {
+        const size_t size_energy_img = width * height * sizeof(float);
+
+        float *energy_image = (float *) malloc(size_energy_img);
+        compute_energy(image_in, energy_image, height, width, cpp);
+
+        cumulative_energy(energy_image, height, width);
+
+        const size_t path_length = height * sizeof(int);
+        int *path = (int *) malloc(path_length);
+        find_seam(energy_image, path, height, width);
+
+        // we don't need the energy image aymore
+        free(energy_image);
+
+        // tole neb blo potrebno, če bi dejansko mel tabelo dimenzij WxHxC 
+        // nism sure koliko je tole alociranje spomina drago
+        const size_t size_reduced = (width-1) * height * cpp * sizeof(unsigned char);
+        unsigned char *img_reduced = (unsigned char *) malloc(size_reduced);
+        remove_seam(image_in, img_reduced, path, height, width, cpp);
+        image_in = img_reduced;
+        free(img_reduced);
+
+        width--; // širina slike se je zmanjšala za 1
+        free(path);
+    }
+
     const size_t datasize = width * height * cpp * sizeof(unsigned char);
-    const size_t size_energy_img = width * height * sizeof(float);
-    float *energy_image = (float *) malloc(size_energy_img);
-    compute_energy(image_in, energy_image, height, width, cpp);
-
-    const size_t path_length = height * sizeof(int);
-    cumulative_energy(energy_image, height, width);
-
-    int *path = (int *) malloc(path_length);
-    find_seam(energy_image, path, height, width);
-
     unsigned char *image_out = (unsigned char *) malloc(datasize);
 
     save_image(image_out, height, width, cpp, image_out_title);
