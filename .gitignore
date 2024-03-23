@@ -1,0 +1,5 @@
+### Git ignore log files ###
+*.log
+
+### ignore the compiled c file ###
+seam_carve
