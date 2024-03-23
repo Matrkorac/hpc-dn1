@@ -136,17 +136,13 @@ void compute_energy(unsigned char *image, float *energy_image, int height, int w
                 }
 
                 // compute the average
-                energy_image[(width * row) + col] = sqrt((g_x*g_x) + (g_y*g_y)) / cpp;
-
-                /*
-                uporabi tole is spodnji zanki za izračun povprečja, če je numerična napaka pri zgornjem večkratnem deljenju
-                prevelika in kvari rezultate.
+                // odstrani deljenje s cpp, če bo prihajalo do prevelike računske napake
+                int pixel_index = row * width + col;
                 if (cpp == 0) {
-                    energy_image[pixel_index] = sqrt((g_x*g_x) + (g_y*g_y));
+                    energy_image[pixel_index] = sqrt((g_x*g_x) + (g_y*g_y)) / cpp;
                 } else {
-                    energy_image[pixel_index] += sqrt((g_x*g_x) + (g_y*g_y));
+                    energy_image[pixel_index] += sqrt((g_x*g_x) + (g_y*g_y)) / cpp;
                 }
-                */
             }
         }
     }
