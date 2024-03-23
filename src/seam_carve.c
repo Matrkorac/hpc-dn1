@@ -147,6 +147,7 @@ void compute_energy(unsigned char *image, float *energy_image, int height, int w
         }
     }
     /*
+    // funkcija se uporabi za izračun povprečja, če v prejšnjem koraku ne delimo s cpp
     # pragma openmp ...
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
@@ -154,6 +155,24 @@ void compute_energy(unsigned char *image, float *energy_image, int height, int w
         }
     }
     */
+}
+
+void identify_seam(float *energy_image, int *path, int height, int width, int cpp)
+{
+    // leave the bottom most row alone
+    for (int row = height - 2; row >= 0; row--) {
+        // inner loop can be completely parallel
+        for (int col = 0; col < width; col++) {
+            float min = energy_image[(row+1) * width + col];
+            if (col != 0 && energy_image[(row+1) * width + col - 1] < min) {
+                min = energy_image[(row+1) * width + col - 1];
+            } else if (col != width - 1 && energy_image[(row+1) * width + col + 1] < min) {
+                min = energy_image[(row+1) * width + col + 1];
+            }
+            energy_image[row * width + col] += min; 
+        }
+        // openm barrier
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -179,6 +198,10 @@ int main(int argc, char *argv[]) {
     const size_t size_energy_img = width * height * sizeof(float);
     float *energy_image = (float *) malloc(size_energy_img);
     compute_energy(image_in, energy_image, height, width, cpp);
+
+    const size_t path_length = height * sizeof(int);
+    int *path = (int *) malloc(path_length);
+    identify_seam(energy_image, path, height, width, cpp);
 
     unsigned char *image_out = (unsigned char *) malloc(datasize);
 
