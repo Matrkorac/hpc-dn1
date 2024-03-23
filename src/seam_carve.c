@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <omp.h>
+#include <math.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -55,6 +56,110 @@ void save_image(unsigned char *image_out, int height, int width, int cpp, char i
         printf("Error: Unknown image format %s! Only png, bmp, or bmp supported.\n", file_type);
 }
 
+void compute_energy(unsigned char *image, float *energy_image, int height, int width, int cpp)
+{
+    // pragma openmc for parallel
+    for (int c = 0; c < cpp; c++) {
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                int partial_index = (c * height * width);
+                //  G_x = -image[i-1, j-1] - 2*image[i, j-1] - image[i+1, j-1]
+                //        +image[i-1, j+1] + 2*image[i, j+1] + image[i+1, j+1]
+                //  G_y = -image[i-1, j-1] - 2*image[i, j-1] - image[i+1, j-1]
+                //        +image[i-1, j+1] + 2*image[i, j+1] + image[i+1, j+1]
+                int g_x;
+                int g_y;
+                // we have 8 edge cases (the pixel is in one of the corners or one of the border pixels)
+                if (row == 0 && col == 0) {
+                    // top left corner
+                    g_x = -3*image[partial_index + row * width + col] - image[partial_index + row * width + (col + 1)]
+                          +3*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + (col + 1)];
+                    
+                    g_y = -3*image[partial_index + row * width + col] - image[partial_index + row * width + (col + 1)]
+                          +3*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + (col + 1)];
+                } else if (row == 0 && col == width - 1) {
+                    // top right corner
+                    g_x = -3*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
+                          +3*image[partial_index + row * width + col] + image[partial_index + (row + 1) * width + col];
+                    
+                    g_y = -image[partial_index + row * width + col - 1] - 3*image[partial_index + row * width + col]
+                          +image[partial_index + (row + 1) * width + col - 1] + 3*image[partial_index + (row + 1) * width + col];
+                } else if (row == height - 1 && col == 0) {
+                    // bottom left corner
+                    g_x = -image[partial_index + (row - 1) * width + col] - 3*image[partial_index + row * width + col]
+                          +image[partial_index + (row - 1) * width + col + 1] + 3*image[partial_index + row * width + col + 1];
+                    
+                    g_y = -3*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
+                          +3*image[partial_index + row * width + col] + image[partial_index + row * width + col + 1];
+                } else if (row == height - 1 && col == width - 1) {
+                    // bottom right corner
+                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + row * width + col - 1]
+                          +image[partial_index + (row - 1) * width + col] + 3*image[partial_index + row * width + col];
+                    
+                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + (row - 1) * width + col]
+                          +image[partial_index + row * width + col - 1] + 3*image[partial_index + row * width + col];
+                } else if (row == 0) {
+                    // upper edge
+                    g_x = -3*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
+                          +3*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + col + 1];
+                    
+                    g_y = -image[partial_index + row * width + col - 1] - 2*image[partial_index + row * width + col] - image[partial_index + row * width + col + 1]
+                          +image[partial_index + (row + 1) * width + col - 1] + 2*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + col + 1];
+                } else if (row == height - 1) {
+                    // bottom edge
+                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + row * width + col - 1]
+                          +image[partial_index + (row - 1) * width + col + 1] + 3*image[partial_index + row * width + col + 1];
+                    
+                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
+                          +image[partial_index + row * width + col - 1] + 2*image[partial_index + row * width + col] + image[partial_index + row * width + col + 1];
+                } else if (col == 0) {
+                    // left edge
+                    g_x = -image[partial_index + (row - 1) * width + col] - 2*image[partial_index + row * width + col] - image[partial_index + (row + 1) * width + col]
+                          +image[partial_index + (row - 1) * width + col + 1] + 2*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + col + 1];
+                    
+                    g_y = -3*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
+                          +3*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + col + 1];
+                } else if (col == width - 1) {
+                    // right edge
+                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
+                          +image[partial_index + (row - 1) * width + col] + 2*image[partial_index + row * width + col] + image[partial_index + (row + 1) * width + col];
+                    
+                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + (row - 1) * width + col]
+                          +image[partial_index + (row + 1) * width + col - 1] + 3*image[partial_index + (row + 1) * width + col];
+                } else {
+                    // all other pixels
+                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
+                          +image[partial_index + (row - 1) * width + col + 1] + 2*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + col + 1];
+                    
+                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
+                          +image[partial_index + (row + 1) * width + col - 1] + 2*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + col + 1];
+                }
+
+                // compute the average
+                energy_image[(width * row) + col] = sqrt((g_x*g_x) + (g_y*g_y)) / cpp;
+
+                /*
+                uporabi tole is spodnji zanki za izračun povprečja, če je numerična napaka pri zgornjem večkratnem deljenju
+                prevelika in kvari rezultate.
+                if (cpp == 0) {
+                    energy_image[pixel_index] = sqrt((g_x*g_x) + (g_y*g_y));
+                } else {
+                    energy_image[pixel_index] += sqrt((g_x*g_x) + (g_y*g_y));
+                }
+                */
+            }
+        }
+    }
+    /*
+    # pragma openmp ...
+    for (int i = 0; i < height; i++) {
+        for (int j = 0; j < width; j++) {
+            energy_image[i*height + j] = energy_image[i*height + j] / cpp;
+        }
+    }
+    */
+}
+
 int main(int argc, char *argv[]) {
 
     if (argc < 3)
@@ -75,8 +180,12 @@ int main(int argc, char *argv[]) {
     unsigned char *image_in = load_image(&height, &width, &cpp, image_in_title);
 
     const size_t datasize = width * height * cpp * sizeof(unsigned char);
-    unsigned char *image_out = (unsigned char *)malloc(datasize);
-    
+    const size_t size_energy_img = width * height * sizeof(float);
+    float *energy_image = (float *) malloc(size_energy_img);
+    compute_energy(image_in, energy_image, height, width, cpp);
+
+    unsigned char *image_out = (unsigned char *) malloc(datasize);
+
     save_image(image_out, height, width, cpp, image_out_title);
     // Release the memory
     free(image_in);
