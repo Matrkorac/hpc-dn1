@@ -175,6 +175,39 @@ void cumulative_energy(float *energy_image, int height, int width)
     }
 }
 
+// funkcija za iskanje indexa z min vrednostjo v tabeli
+int find_min_indx(float* energy, int width)
+{
+    int min_idx = 0;
+    // TODO ne vem, če se da dobro paralizirat ker mora biti min_index globalni za vse niti
+    for (int col = 1; col < width; col++) {
+        // ker gledamo samo prvo vrstico, nam vrstice ni treba upoštevati
+        if (energy[col] < energy[min_idx]) {
+            min_idx = col;
+        }
+    }
+    return min_idx;
+}
+
+void find_seam(float *energy, int *seam_index, int height, int width)
+{
+    // v prvi vstici 
+    seam_index[0] = find_min_indx(energy, width);
+    for (int row = 1; row < height; row++) {
+        int prev_idx = seam_index[row-1];
+        int min_idx = prev_idx;
+        // preverimo levi element
+        if (prev_idx != 0 && energy[row * width + prev_idx - 1] < energy[row * width + prev_idx]) {
+            min_idx--;
+        }
+        // preverimo desni element
+        if (prev_idx != width - 1 && energy[row * width + prev_idx + 1] < energy[row * width + prev_idx]) {
+            min_idx++;
+        }
+        seam_index[row] = min_idx;
+    }
+}
+
 int main(int argc, char *argv[]) {
 
     if (argc < 3)
@@ -201,6 +234,9 @@ int main(int argc, char *argv[]) {
 
     const size_t path_length = height * sizeof(int);
     cumulative_energy(energy_image, height, width);
+
+    int *path = (int *) malloc(path_length);
+    find_seam(energy_image, path, height, width);
 
     unsigned char *image_out = (unsigned char *) malloc(datasize);
 
