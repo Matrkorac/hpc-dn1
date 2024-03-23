@@ -157,7 +157,7 @@ void compute_energy(unsigned char *image, float *energy_image, int height, int w
     */
 }
 
-void identify_seam(float *energy_image, int *path, int height, int width, int cpp)
+void cumulative_energy(float *energy_image, int height, int width)
 {
     // leave the bottom most row alone
     for (int row = height - 2; row >= 0; row--) {
@@ -200,8 +200,7 @@ int main(int argc, char *argv[]) {
     compute_energy(image_in, energy_image, height, width, cpp);
 
     const size_t path_length = height * sizeof(int);
-    int *path = (int *) malloc(path_length);
-    identify_seam(energy_image, path, height, width, cpp);
+    cumulative_energy(energy_image, height, width);
 
     unsigned char *image_out = (unsigned char *) malloc(datasize);
 
