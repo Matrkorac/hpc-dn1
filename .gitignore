@@ -1,5 +1,9 @@
 ### Git ignore log files ###
 *.log
 
+### ignore output images ###
+*_out.png 
+
+
 ### ignore the compiled c file ###
 seam_carve
