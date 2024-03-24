@@ -56,12 +56,13 @@ void save_image(unsigned char *image_out, int height, int width, int cpp, char i
         printf("Error: Unknown image format %s! Only png, bmp, or bmp supported.\n", file_type);
 }
 
-void compute_energy(unsigned char *image, float *energy_image, int height, int width, int cpp)
+void compute_energy(unsigned char *image, double *energy_image, int height, int width, int cpp)
 {
+    // index = (i * width + j) * channels + k                       
     // pragma openmc for parallel
-    for (int c = 0; c < cpp; c++) {
-        for (int row = 0; row < height; row++) {
-            for (int col = 0; col < width; col++) {
+    for (int row = 0; row < height; row++) {
+        for (int col = 0; col < width; col++) {
+            for (int c = 0; c < cpp; c++) {
                 int partial_index = (c * height * width);
                 //  G_x = -image[i-1, j-1] - 2*image[i, j-1] - image[i+1, j-1]
                 //        +image[i-1, j+1] + 2*image[i, j+1] + image[i+1, j+1]
@@ -72,101 +73,102 @@ void compute_energy(unsigned char *image, float *energy_image, int height, int w
                 // we have 8 edge cases (the pixel is in one of the corners or one of the border pixels)
                 if (row == 0 && col == 0) {
                     // top left corner
-                    g_x = -3*image[partial_index + row * width + col] - image[partial_index + row * width + (col + 1)]
-                          +3*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + (col + 1)];
+                    g_x = -3*image[(row * width + col) * cpp + c] - image[(row * width + (col + 1)) * cpp + c]
+                          +3*image[(row * width + col + 1) * cpp + c] + image[((row + 1) * width + (col + 1)) * cpp + c];
                     
-                    g_y = -3*image[partial_index + row * width + col] - image[partial_index + row * width + (col + 1)]
-                          +3*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + (col + 1)];
+                    g_y = -3*image[(row * width + col) * cpp + c] - image[(row * width + (col + 1)) * cpp + c]
+                          +3*image[((row + 1) * width + col) * cpp + c] + image[((row + 1) * width + (col + 1)) * cpp + c];
                 } else if (row == 0 && col == width - 1) {
                     // top right corner
-                    g_x = -3*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
-                          +3*image[partial_index + row * width + col] + image[partial_index + (row + 1) * width + col];
+                    g_x = -3*image[(row * width + col - 1) * cpp + c] - image[((row + 1) * width + col - 1) * cpp + c]
+                          +3*image[(row * width + col) * cpp + c] + image[((row + 1) * width + col) * cpp + c];
                     
-                    g_y = -image[partial_index + row * width + col - 1] - 3*image[partial_index + row * width + col]
-                          +image[partial_index + (row + 1) * width + col - 1] + 3*image[partial_index + (row + 1) * width + col];
+                    g_y = -image[(row * width + col - 1) * cpp + c] - 3*image[(row * width + col) * cpp + c]
+                          +image[((row + 1) * width + col - 1) * cpp + c] + 3*image[((row + 1) * width + col) * cpp + c];
                 } else if (row == height - 1 && col == 0) {
                     // bottom left corner
-                    g_x = -image[partial_index + (row - 1) * width + col] - 3*image[partial_index + row * width + col]
-                          +image[partial_index + (row - 1) * width + col + 1] + 3*image[partial_index + row * width + col + 1];
+                    g_x = -image[((row - 1) * width + col) * cpp + c] - 3*image[(row * width + col) * cpp + c]
+                          +image[((row - 1) * width + col + 1) * cpp + c] + 3*image[(row * width + col + 1) * cpp + c];
                     
-                    g_y = -3*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
-                          +3*image[partial_index + row * width + col] + image[partial_index + row * width + col + 1];
+                    g_y = -3*image[((row - 1) * width + col) * cpp + c] - image[((row - 1) * width + col + 1) * cpp + c]
+                          +3*image[(row * width + col) * cpp + c] + image[(row * width + col + 1) * cpp + c];
                 } else if (row == height - 1 && col == width - 1) {
                     // bottom right corner
-                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + row * width + col - 1]
-                          +image[partial_index + (row - 1) * width + col] + 3*image[partial_index + row * width + col];
+                    g_x = -image[((row - 1) * width + col - 1) * cpp + c] - 3*image[(row * width + col - 1) * cpp + c]
+                          +image[((row - 1) * width + col) * cpp + c] + 3*image[(row * width + col) * cpp + c];
                     
-                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + (row - 1) * width + col]
-                          +image[partial_index + row * width + col - 1] + 3*image[partial_index + row * width + col];
+                    g_y = -image[((row - 1) * width + col - 1) * cpp + c] - 3*image[((row - 1) * width + col) * cpp + c]
+                          +image[(row * width + col - 1) * cpp + c] + 3*image[(row * width + col) * cpp + c];
                 } else if (row == 0) {
                     // upper edge
-                    g_x = -3*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
-                          +3*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + col + 1];
+                    g_x = -3*image[(row * width + col - 1) * cpp + c] - image[((row + 1) * width + col - 1) * cpp + c]
+                          +3*image[(row * width + col + 1) * cpp + c] + image[((row + 1) * width + col + 1) * cpp + c];
                     
-                    g_y = -image[partial_index + row * width + col - 1] - 2*image[partial_index + row * width + col] - image[partial_index + row * width + col + 1]
-                          +image[partial_index + (row + 1) * width + col - 1] + 2*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + col + 1];
+                    g_y = -image[(row * width + col - 1) * cpp + c] - 2*image[(row * width + col) * cpp + c] - image[(row * width + col + 1) * cpp + c]
+                          +image[((row + 1) * width + col - 1) * cpp + c] + 2*image[((row + 1) * width + col) * cpp + c] + image[((row + 1) * width + col + 1) * cpp + c];
                 } else if (row == height - 1) {
                     // bottom edge
-                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + row * width + col - 1]
-                          +image[partial_index + (row - 1) * width + col + 1] + 3*image[partial_index + row * width + col + 1];
+                    g_x = -image[((row - 1) * width + col - 1) * cpp + c] - 3*image[(row * width + col - 1) * cpp + c]
+                          +image[((row - 1) * width + col + 1) * cpp + c] + 3*image[(row * width + col + 1) * cpp + c];
                     
-                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
-                          +image[partial_index + row * width + col - 1] + 2*image[partial_index + row * width + col] + image[partial_index + row * width + col + 1];
+                    g_y = -image[((row - 1) * width + col - 1) * cpp + c] - 2*image[((row - 1) * width + col) * cpp + c] - image[((row - 1) * width + col + 1) * cpp + c]
+                          +image[(row * width + col - 1) * cpp + c] + 2*image[(row * width + col) * cpp + c] + image[(row * width + col + 1) * cpp + c];
                 } else if (col == 0) {
                     // left edge
-                    g_x = -image[partial_index + (row - 1) * width + col] - 2*image[partial_index + row * width + col] - image[partial_index + (row + 1) * width + col]
-                          +image[partial_index + (row - 1) * width + col + 1] + 2*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + col + 1];
+                    g_x = -image[((row - 1) * width + col) * cpp + c] - 2*image[(row * width + col) * cpp + c] - image[((row + 1) * width + col) * cpp + c]
+                          +image[((row - 1) * width + col + 1) * cpp + c] + 2*image[(row * width + col + 1) * cpp + c] + image[((row + 1) * width + col + 1) * cpp + c];
                     
-                    g_y = -3*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
-                          +3*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + col + 1];
+                    g_y = -3*image[((row - 1) * width + col) * cpp + c] - image[((row - 1) * width + col + 1) * cpp + c]
+                          +3*image[((row + 1) * width + col) * cpp + c] + image[((row + 1) * width + col + 1) * cpp + c];
                 } else if (col == width - 1) {
                     // right edge
-                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
-                          +image[partial_index + (row - 1) * width + col] + 2*image[partial_index + row * width + col] + image[partial_index + (row + 1) * width + col];
+                    g_x = -image[((row - 1) * width + col - 1) * cpp + c] - 2*image[(row * width + col - 1) * cpp + c] - image[((row + 1) * width + col - 1) * cpp + c]
+                          +image[((row - 1) * width + col) * cpp + c] + 2*image[(row * width + col) * cpp + c] + image[((row + 1) * width + col) * cpp + c];
                     
-                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 3*image[partial_index + (row - 1) * width + col]
-                          +image[partial_index + (row + 1) * width + col - 1] + 3*image[partial_index + (row + 1) * width + col];
+                    g_y = -image[((row - 1) * width + col - 1) * cpp + c] - 3*image[((row - 1) * width + col) * cpp + c]
+                          +image[((row + 1) * width + col - 1) * cpp + c] + 3*image[((row + 1) * width + col) * cpp + c];
                 } else {
                     // all other pixels
-                    g_x = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + row * width + col - 1] - image[partial_index + (row + 1) * width + col - 1]
-                          +image[partial_index + (row - 1) * width + col + 1] + 2*image[partial_index + row * width + col + 1] + image[partial_index + (row + 1) * width + col + 1];
+                    g_x = -image[((row - 1) * width + col - 1) * cpp + c] - 2*image[(row * width + col - 1) * cpp + c] - image[((row + 1) * width + col - 1) * cpp + c]
+                          +image[((row - 1) * width + col + 1) * cpp + c] + 2*image[(row * width + col + 1) * cpp + c] + image[((row + 1) * width + col + 1) * cpp + c];
                     
-                    g_y = -image[partial_index + (row - 1) * width + col - 1] - 2*image[partial_index + (row - 1) * width + col] - image[partial_index + (row - 1) * width + col + 1]
-                          +image[partial_index + (row + 1) * width + col - 1] + 2*image[partial_index + (row + 1) * width + col] + image[partial_index + (row + 1) * width + col + 1];
+                    g_y = -image[((row - 1) * width + col - 1) * cpp + c] - 2*image[((row - 1) * width + col) * cpp + c] - image[((row - 1) * width + col + 1) * cpp + c]
+                          +image[((row + 1) * width + col - 1) * cpp + c] + 2*image[((row + 1) * width + col) * cpp + c] + image[((row + 1) * width + col + 1) * cpp + c];
                 }
 
                 // compute the average
                 // odstrani deljenje s cpp, če bo prihajalo do prevelike računske napake
                 int pixel_index = row * width + col;
                 if (cpp == 0) {
-                    energy_image[pixel_index] = sqrt((g_x*g_x) + (g_y*g_y)) / cpp;
+                    energy_image[pixel_index] = sqrt((g_x*g_x) + (g_y*g_y));
                 } else {
-                    energy_image[pixel_index] += sqrt((g_x*g_x) + (g_y*g_y)) / cpp;
+                    energy_image[pixel_index] += sqrt((g_x*g_x) + (g_y*g_y));
                 }
             }
         }
     }
-    /*
+    
     // funkcija se uporabi za izračun povprečja, če v prejšnjem koraku ne delimo s cpp
-    # pragma openmp ...
+    // # pragma openmp ...
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
-            energy_image[i*height + j] = energy_image[i*height + j] / cpp;
+            energy_image[i*width + j] /= cpp;
         }
     }
-    */
+
 }
 
-void cumulative_energy(float *energy_image, int height, int width)
+void cumulative_energy(double *energy_image, int height, int width)
 {
     // leave the bottom most row alone
     for (int row = height - 2; row >= 0; row--) {
         // inner loop can be completely parallel
         for (int col = 0; col < width; col++) {
-            float min = energy_image[(row+1) * width + col];
+            double min = energy_image[(row+1) * width + col];
             if (col != 0 && energy_image[(row+1) * width + col - 1] < min) {
                 min = energy_image[(row+1) * width + col - 1];
-            } else if (col != width - 1 && energy_image[(row+1) * width + col + 1] < min) {
+            }
+            if (col != width - 1 && energy_image[(row+1) * width + col + 1] < min) {
                 min = energy_image[(row+1) * width + col + 1];
             }
             energy_image[row * width + col] += min; 
@@ -176,7 +178,7 @@ void cumulative_energy(float *energy_image, int height, int width)
 }
 
 // funkcija za iskanje indexa z min vrednostjo v tabeli
-int find_min_indx(float* energy, int width)
+int find_min_indx(double* energy, int width)
 {
     int min_idx = 0;
     // TODO ne vem, če se da dobro paralizirat ker mora biti min_index globalni za vse niti
@@ -189,23 +191,25 @@ int find_min_indx(float* energy, int width)
     return min_idx;
 }
 
-void find_seam(float *energy, int *seam_index, int height, int width)
+void find_seam(double *energy_image, int *seam_index, int height, int width)
 {
-    // v prvi vstici 
-    seam_index[0] = find_min_indx(energy, width);
+    // v prvi vstici
+    seam_index[0] = find_min_indx(energy_image, width);
     for (int row = 1; row < height; row++) {
         int prev_idx = seam_index[row-1];
         int min_idx = prev_idx;
         // preverimo levi element
-        if (prev_idx != 0 && energy[row * width + prev_idx - 1] < energy[row * width + prev_idx]) {
+        if (prev_idx != 0 && energy_image[row * width + prev_idx - 1] < energy_image[row * width + prev_idx]) {
             min_idx--;
         }
         // preverimo desni element
-        if (prev_idx != width - 1 && energy[row * width + prev_idx + 1] < energy[row * width + prev_idx]) {
+        if (prev_idx != width - 1 && energy_image[row * width + prev_idx + 1] < energy_image[row * width + prev_idx]) {
             min_idx++;
         }
+        printf("%d ", min_idx);
         seam_index[row] = min_idx;
     }
+    printf("\n");
 }
 
 void remove_seam(unsigned char *image, unsigned char *img_reduced, int *path, int height, int width, int cpp) 
@@ -237,7 +241,7 @@ int main(int argc, char *argv[]) {
     char image_in_title[255];
     char image_out_title[255];
     // TODO tole mora prit iz argumentov se mi zdi
-    int seams_to_remove = 64;
+    int seams_to_remove = 128;
 
     snprintf(image_in_title, 255, "%s", argv[1]);
     snprintf(image_out_title, 255, "%s", argv[2]);
@@ -249,9 +253,9 @@ int main(int argc, char *argv[]) {
 
     // tole mora bit sekvenčno
     for (int i = 0; i < seams_to_remove; i++) {
-        const size_t size_energy_img = width * height * sizeof(float);
 
-        float *energy_image = (float *) malloc(size_energy_img);
+        const size_t size_energy_img = width * height * sizeof(double);
+        double *energy_image = (double *) malloc(size_energy_img);
         compute_energy(image_in, energy_image, height, width, cpp);
 
         cumulative_energy(energy_image, height, width);
