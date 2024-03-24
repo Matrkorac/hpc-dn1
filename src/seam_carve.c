@@ -210,18 +210,17 @@ void find_seam(float *energy, int *seam_index, int height, int width)
 
 void remove_seam(unsigned char *image, unsigned char *img_reduced, int *path, int height, int width, int cpp) 
 {
+    // index = (i * width + j) * channels + k                       
     // tole zunanjo se da paralelizirat
     for (int row = 0; row < height; row++) {
         // notranje na žalost ne
         for (int col = 0; col < width; col++) {
-            if (col < path[row]) {
-                img_reduced[row * width + col] = image[row * width + col];
-                img_reduced[(row * height) +  row * width + col] = image[(row * height) + row * width + col];
-                img_reduced[(2 * row * height) + row * width + col] = image[(2 * row * height) + row * width + col];
-            } else if (col > path[row]) {
-                img_reduced[row * (width - 1) + col - 1] = image[row * width + col];
-                img_reduced[(row * height) +  row * width + col - 1] = image[(row * height) + row * width + col];
-                img_reduced[(2 * row * height) + row * width + col - 1] = image[(2 * row * height) + row * width + col];
+            for (int c = 0; c < cpp; c++) {
+                if (col < path[row]) {
+                    img_reduced[(row * (width-1) + col) * cpp + c] = image[(row * width + col) * cpp + c];
+                } else if (col > path[row]) {
+                    img_reduced[(row * (width-1) + (col-1)) * cpp + c] = image[(row * width + col) * cpp + c];
+                }
             }
         }
     }
@@ -238,7 +237,7 @@ int main(int argc, char *argv[]) {
     char image_in_title[255];
     char image_out_title[255];
     // TODO tole mora prit iz argumentov se mi zdi
-    int seams_to_remove = 32;
+    int seams_to_remove = 64;
 
     snprintf(image_in_title, 255, "%s", argv[1]);
     snprintf(image_out_title, 255, "%s", argv[2]);
@@ -269,20 +268,16 @@ int main(int argc, char *argv[]) {
         const size_t size_reduced = (width-1) * height * cpp * sizeof(unsigned char);
         unsigned char *img_reduced = (unsigned char *) malloc(size_reduced);
         remove_seam(image_in, img_reduced, path, height, width, cpp);
+        free(image_in);
         image_in = img_reduced;
-        free(img_reduced);
 
         width--; // širina slike se je zmanjšala za 1
         free(path);
     }
 
-    const size_t datasize = width * height * cpp * sizeof(unsigned char);
-    unsigned char *image_out = (unsigned char *) malloc(datasize);
-
-    save_image(image_out, height, width, cpp, image_out_title);
+    save_image(image_in, height, width, cpp, image_out_title);
     // Release the memory
     free(image_in);
-    free(image_out);
 
     return 0;
 }
