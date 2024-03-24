@@ -155,7 +155,6 @@ void compute_energy(unsigned char *image, double *energy_image, int height, int 
             energy_image[i*width + j] /= cpp;
         }
     }
-
 }
 
 void cumulative_energy(double *energy_image, int height, int width)
@@ -206,10 +205,10 @@ void find_seam(double *energy_image, int *seam_index, int height, int width)
         if (prev_idx != width - 1 && energy_image[row * width + prev_idx + 1] < energy_image[row * width + prev_idx]) {
             min_idx++;
         }
-        printf("%d ", min_idx);
+        // printf("%d ", min_idx);
         seam_index[row] = min_idx;
     }
-    printf("\n");
+    // printf("\n");
 }
 
 void remove_seam(unsigned char *image, unsigned char *img_reduced, int *path, int height, int width, int cpp) 
@@ -232,7 +231,7 @@ void remove_seam(unsigned char *image, unsigned char *img_reduced, int *path, in
 
 int main(int argc, char *argv[]) {
 
-    if (argc < 3)
+    if (argc < 4)
     {
         printf("USAGE: sample input_image output_image\n");
         exit(EXIT_FAILURE);
@@ -240,11 +239,10 @@ int main(int argc, char *argv[]) {
 
     char image_in_title[255];
     char image_out_title[255];
-    // TODO tole mora prit iz argumentov se mi zdi
-    int seams_to_remove = 128;
 
-    snprintf(image_in_title, 255, "%s", argv[1]);
-    snprintf(image_out_title, 255, "%s", argv[2]);
+    snprintf(image_in_title, 255, "%s", argv[1]); // input file
+    snprintf(image_out_title, 255, "%s", argv[2]); // output file
+    int seams_to_remove = atoi(argv[3]); // seams to remove
 
     int height;
     int width;
