@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <omp.h>
 #include <math.h>
+#include <sys/time.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -21,9 +22,8 @@ void copy_image(unsigned char *image_out, const unsigned char *image_in, size_t 
     }
 }
 
-unsigned char* load_image(int *height, int *width, int *cpp, char image_title[255]) 
+unsigned char* load_image(int *height, int *width, int *cpp, const char image_title[255]) 
 {
-    // Load image from file and allocate space for the output image
     unsigned char *image = stbi_load(image_title, width, height, cpp, COLOR_CHANNELS);
 
     if (image == NULL)
@@ -45,7 +45,6 @@ void save_image(unsigned char *image_out, int height, int width, int cpp, char i
         file_type = token;
         token = strtok(NULL, ".");
     }
-
     if (!strcmp(file_type, "png"))
         stbi_write_png(image_out_title, width, height, cpp, image_out, width * cpp);
     else if (!strcmp(file_type, "jpg"))
@@ -245,56 +244,111 @@ void remove_seam(unsigned char *image, unsigned char *img_reduced, int *path, in
     }
 }
 
-int main(int argc, char *argv[]) {
+// Function to get the current time
+double get_wall_time() {
+    struct timeval time;
+    if (gettimeofday(&time, NULL)) {
+        return 0;
+    }
+    return (double)time.tv_sec + (double)time.tv_usec * .000001;
+}
 
-    if (argc < 4)
-    {
-        printf("USAGE: sample input_image output_image\n");
+int main(int argc, char *argv[]) {
+    // Check if the correct number of command-line arguments is provided
+    if (argc < 4) {
+        printf("USAGE: %s input_image output_image num_seams_to_remove\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    char image_in_title[255];
-    char image_out_title[255];
+    // Extract command-line arguments
+    const char *image_in_title = argv[1];
+    const char *image_out_title = argv[2];
+    int seams_to_remove = atoi(argv[3]);
 
-    snprintf(image_in_title, 255, "%s", argv[1]); // input file
-    snprintf(image_out_title, 255, "%s", argv[2]); // output file
-    int seams_to_remove = atoi(argv[3]); // seams to remove
+    // Load the input image
+    int height, orig_width, width, cpp;
+    unsigned char *image_in = load_image(&height, &orig_width, &cpp, image_in_title);
 
-    int height;
-    int width;
-    int cpp;
-    unsigned char *image_in = load_image(&height, &width, &cpp, image_in_title);
+    // Define different numbers of cores to test
+    int num_cores[] = {1, 2, 4};
 
-    // tole mora bit sekvenčno
-    for (int i = 0; i < seams_to_remove; i++) {
+    // Define the number of runs to average time measurements
+    int num_runs = 3;
 
-        const size_t size_energy_img = width * height * sizeof(double);
-        double *energy_image = (double *) malloc(size_energy_img);
-        compute_energy(image_in, energy_image, height, width, cpp);
+    // Initialize variables to store optimal configuration
+    double min_time = INFINITY;
+    int optimal_cores = 0;
 
-        cumulative_energy(energy_image, height, width);
 
-        const size_t path_length = height * sizeof(int);
-        int *path = (int *) malloc(path_length);
-        find_seam(energy_image, path, height, width);
+    // Perform time measurements for different numbers of cores
+    for (int k = 0; k < sizeof(num_cores) / sizeof(num_cores[0]); k++) {
+        int cores = num_cores[k];
+        omp_set_num_threads(cores);
 
-        // we don't need the energy image aymore
-        free(energy_image);
+        double total_time = 0.0;
+        for (int run = 0; run < num_runs; run++) {
+            // Start timing
+            double start_time = get_wall_time();
+            width = orig_width;
 
-        // tole neb blo potrebno, če bi dejansko mel tabelo dimenzij WxHxC 
-        // nism sure koliko je tole alociranje spomina drago
-        const size_t size_reduced = (width-1) * height * cpp * sizeof(unsigned char);
-        unsigned char *img_reduced = (unsigned char *) malloc(size_reduced);
-        remove_seam(image_in, img_reduced, path, height, width, cpp);
-        free(image_in);
-        image_in = img_reduced;
+            // Allocate memory for energy image and path outside the loop
+            const size_t size_energy_img = width * height * sizeof(double);
+            double *energy_image = (double *) malloc(size_energy_img);
+            const size_t path_length = height * sizeof(int);
+            int *path = (int *) malloc(path_length);
 
-        width--; // širina slike se je zmanjšala za 1
-        free(path);
+            // Allocate memory for the output image
+            unsigned char *image_out = (unsigned char *)malloc(height * width * cpp * sizeof(unsigned char));
+
+            // Copy input image to output image
+            memcpy(image_out, image_in, height * width * cpp * sizeof(unsigned char));
+
+            //  tole mora bit sekvenčno
+            for (int i = 0; i < seams_to_remove; i++) {
+
+                compute_energy(image_out, energy_image, height, width, cpp);
+
+                cumulative_energy(energy_image, height, width);
+
+                find_seam(energy_image, path, height, width);
+
+                // Remove seam directly on the original image
+                remove_seam(image_out, image_out, path, height, width, cpp);
+                width--; // Update width
+            }
+
+            // End timing
+            double end_time = get_wall_time();
+
+            // Calculate elapsed time
+            total_time += (end_time - start_time);
+
+            // Free memory for energy image and path
+            free(energy_image);
+            free(path);
+            free(image_out);
+        }
+
+        // Calculate average time for the current configuration
+        double avg_time = total_time / num_runs;
+
+        // Update optimal configuration if necessary
+        if (avg_time < min_time) {
+            min_time = avg_time;
+            optimal_cores = cores;
+        }
+        // Modify the output image path to include the number of cores
+        char output_path[255];
+        snprintf(output_path, sizeof(output_path), "%s_%d.png", image_out_title, cores);
+        save_image(image_in, height, width, cpp, output_path);
+
+        printf("Average time with %d cores: %f seconds\n", cores, avg_time);
+        printf("%s\n", output_path);
     }
 
-    save_image(image_in, height, width, cpp, image_out_title);
-    // Release the memory
+    printf("Optimal number of cores: %d\n", optimal_cores);
+
+    // Release memory for the input image
     free(image_in);
 
     return 0;
