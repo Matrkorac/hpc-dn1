@@ -160,33 +160,22 @@ void compute_energy(unsigned char *image, double *energy_image, int height, int 
 
 void cumulative_energy(double *energy_image, int height, int width)
 {
-    // Allocate temporary array outside the loop
-    double *temp_energy = (double *)malloc(width * sizeof(double));
-
-    // leave the bottom-most row alone
-    #pragma omp parallel for schedule(static)
+    // leave the bottom most row alone
     for (int row = height - 2; row >= 0; row--) {
         // inner loop can be completely parallel
-        for (int col = 0; col < width; col++) {
-            double min = energy_image[(row + 1) * width + col];
-            if (col != 0 && energy_image[(row + 1) * width + col - 1] < min) {
-                min = energy_image[(row + 1) * width + col - 1];
-            }
-            if (col != width - 1 && energy_image[(row + 1) * width + col + 1] < min) {
-                min = energy_image[(row + 1) * width + col + 1];
-            }
-            temp_energy[col] = energy_image[row * width + col] + min;
-        }
-
-        // merge results back to the energy_image array using reduction
         #pragma omp parallel for schedule(static)
         for (int col = 0; col < width; col++) {
-            energy_image[row * width + col] = temp_energy[col];
+            double min = energy_image[(row+1) * width + col];
+            if (col != 0 && energy_image[(row+1) * width + col - 1] < min) {
+                min = energy_image[(row+1) * width + col - 1];
+            }
+            if (col != width - 1 && energy_image[(row+1) * width + col + 1] < min) {
+                min = energy_image[(row+1) * width + col + 1];
+            }
+            energy_image[row * width + col] += min; 
         }
+        // openm barrier
     }
-
-    // free the temporary array
-    free(temp_energy);
 }
 
 
@@ -267,7 +256,6 @@ int main(int argc, char *argv[]) {
 
     // Load the input image
     int height, orig_width, width, cpp;
-    unsigned char *image_in = load_image(&height, &orig_width, &cpp, image_in_title);
 
     // Define different numbers of cores to test
     int num_cores[] = {1, 2, 4};
@@ -287,34 +275,42 @@ int main(int argc, char *argv[]) {
 
         double total_time = 0.0;
         for (int run = 0; run < num_runs; run++) {
+            unsigned char *image_in = load_image(&height, &orig_width, &cpp, image_in_title);
+
             // Start timing
             double start_time = get_wall_time();
             width = orig_width;
 
-            // Allocate memory for energy image and path outside the loop
-            const size_t size_energy_img = width * height * sizeof(double);
-            double *energy_image = (double *) malloc(size_energy_img);
-            const size_t path_length = height * sizeof(int);
-            int *path = (int *) malloc(path_length);
-
             // Allocate memory for the output image
-            unsigned char *image_out = (unsigned char *)malloc(height * width * cpp * sizeof(unsigned char));
+            // unsigned char *image_out = (unsigned char *)malloc(height * width * cpp * sizeof(unsigned char));
 
-            // Copy input image to output image
-            memcpy(image_out, image_in, height * width * cpp * sizeof(unsigned char));
+            // // Copy input image to output image
+            // copy_image(image_out, image_in, height * width * cpp * sizeof(unsigned char));
 
             //  tole mora bit sekvenčno
             for (int i = 0; i < seams_to_remove; i++) {
 
-                compute_energy(image_out, energy_image, height, width, cpp);
+                const size_t size_energy_img = width * height * sizeof(double);
+                double *energy_image = (double *) malloc(size_energy_img);
+                compute_energy(image_in, energy_image, height, width, cpp);
 
                 cumulative_energy(energy_image, height, width);
 
+                // Allocate memory for energy image and path outside the loop
+                const size_t path_length = height * sizeof(int);
+                int *path = (int *) malloc(path_length);
                 find_seam(energy_image, path, height, width);
+                
+                free(energy_image);
 
-                // Remove seam directly on the original image
-                remove_seam(image_out, image_out, path, height, width, cpp);
+                const size_t size_reduced = (width-1) * height * cpp * sizeof(unsigned char);
+                unsigned char *img_reduced = (unsigned char *) malloc(size_reduced);
+                remove_seam(image_in, img_reduced, path, height, width, cpp);
+                free(image_in);
+                image_in = img_reduced;
+                
                 width--; // Update width
+                free(path);
             }
 
             // End timing
@@ -324,9 +320,14 @@ int main(int argc, char *argv[]) {
             total_time += (end_time - start_time);
 
             // Free memory for energy image and path
-            free(energy_image);
-            free(path);
-            free(image_out);
+            if (run == num_runs - 1) {
+                // Modify the output image path to include the number of cores
+                char output_path[255];
+                snprintf(output_path, sizeof(output_path), "%s_%d.png", image_out_title, cores);
+                save_image(image_in, height, width, cpp, output_path);
+                printf("%s\n", output_path);
+            }
+            free(image_in);
         }
 
         // Calculate average time for the current configuration
@@ -337,19 +338,10 @@ int main(int argc, char *argv[]) {
             min_time = avg_time;
             optimal_cores = cores;
         }
-        // Modify the output image path to include the number of cores
-        char output_path[255];
-        snprintf(output_path, sizeof(output_path), "%s_%d.png", image_out_title, cores);
-        save_image(image_in, height, width, cpp, output_path);
-
         printf("Average time with %d cores: %f seconds\n", cores, avg_time);
-        printf("%s\n", output_path);
     }
 
     printf("Optimal number of cores: %d\n", optimal_cores);
-
-    // Release memory for the input image
-    free(image_in);
 
     return 0;
 }
