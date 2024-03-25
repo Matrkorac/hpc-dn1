@@ -60,6 +60,7 @@ void compute_energy(unsigned char *image, double *energy_image, int height, int 
 {
     // index = (i * width + j) * channels + k                       
     // pragma openmc for parallel
+	#pragma omp parallel for collapse(2) schedule(static)
     for (int row = 0; row < height; row++) {
         for (int col = 0; col < width; col++) {
             for (int c = 0; c < cpp; c++) {
@@ -150,6 +151,7 @@ void compute_energy(unsigned char *image, double *energy_image, int height, int 
     
     // funkcija se uporabi za izračun povprečja, če v prejšnjem koraku ne delimo s cpp
     // # pragma openmp ...
+	#pragma omp parallel for collapse(2) schedule(static)
     for (int i = 0; i < height; i++) {
         for (int j = 0; j < width; j++) {
             energy_image[i*width + j] /= cpp;
@@ -159,22 +161,35 @@ void compute_energy(unsigned char *image, double *energy_image, int height, int 
 
 void cumulative_energy(double *energy_image, int height, int width)
 {
-    // leave the bottom most row alone
+    // Allocate temporary array outside the loop
+    double *temp_energy = (double *)malloc(width * sizeof(double));
+
+    // leave the bottom-most row alone
+    #pragma omp parallel for schedule(static)
     for (int row = height - 2; row >= 0; row--) {
         // inner loop can be completely parallel
         for (int col = 0; col < width; col++) {
-            double min = energy_image[(row+1) * width + col];
-            if (col != 0 && energy_image[(row+1) * width + col - 1] < min) {
-                min = energy_image[(row+1) * width + col - 1];
+            double min = energy_image[(row + 1) * width + col];
+            if (col != 0 && energy_image[(row + 1) * width + col - 1] < min) {
+                min = energy_image[(row + 1) * width + col - 1];
             }
-            if (col != width - 1 && energy_image[(row+1) * width + col + 1] < min) {
-                min = energy_image[(row+1) * width + col + 1];
+            if (col != width - 1 && energy_image[(row + 1) * width + col + 1] < min) {
+                min = energy_image[(row + 1) * width + col + 1];
             }
-            energy_image[row * width + col] += min; 
+            temp_energy[col] = energy_image[row * width + col] + min;
         }
-        // openm barrier
+
+        // merge results back to the energy_image array using reduction
+        #pragma omp parallel for schedule(static)
+        for (int col = 0; col < width; col++) {
+            energy_image[row * width + col] = temp_energy[col];
+        }
     }
+
+    // free the temporary array
+    free(temp_energy);
 }
+
 
 // funkcija za iskanje indexa z min vrednostjo v tabeli
 int find_min_indx(double* energy, int width)
@@ -215,6 +230,7 @@ void remove_seam(unsigned char *image, unsigned char *img_reduced, int *path, in
 {
     // index = (i * width + j) * channels + k                       
     // tole zunanjo se da paralelizirat
+	#pragma omp parallel for schedule(static)
     for (int row = 0; row < height; row++) {
         // notranje na žalost ne
         for (int col = 0; col < width; col++) {
