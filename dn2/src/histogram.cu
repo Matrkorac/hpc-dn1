@@ -16,7 +16,7 @@
 
 __global__ void compute_histograms(const unsigned char *image,
                                     const int width, const int height, const int cpp,
-                                    int H[3][256])
+                                    int H[3*256])
 {
 
     int row = blockDim.x * blockIdx.x + threadIdx.x;
@@ -47,43 +47,43 @@ __global__ void compute_histograms(const unsigned char *image,
     __syncthreads();
 
     // each thread adds a single value into global memory for each histogram
-    atomicAdd(&H[0][threadIdx.x * blockDim.y + threadIdx.y], Hrs[threadIdx.x * blockDim.y + threadIdx.y]);
-    atomicAdd(&H[0][threadIdx.x * blockDim.y + threadIdx.y], Hgs[threadIdx.x * blockDim.y + threadIdx.y]);
-    atomicAdd(&H[0][threadIdx.x * blockDim.y + threadIdx.y], Hbs[threadIdx.x * blockDim.y + threadIdx.y]);
+    atomicAdd(&H[0 + threadIdx.x * blockDim.y + threadIdx.y], Hrs[threadIdx.x * blockDim.y + threadIdx.y]);
+    atomicAdd(&H[256 + threadIdx.x * blockDim.y + threadIdx.y], Hgs[threadIdx.x * blockDim.y + threadIdx.y]);
+    atomicAdd(&H[512 + threadIdx.x * blockDim.y + threadIdx.y], Hbs[threadIdx.x * blockDim.y + threadIdx.y]);
 }
 
 
 // naive implemetation with only three threads
-__global__ void cumulative_histograms(int Hr[256], int Hg[256], int Hb[256], int *min_h)
+__global__ void cumulative_histograms(int H[3*256], int *min_h)
 {
     int idx = threadIdx.x;
 
     if (idx == 0) {
-        int min_r = Hr[0];
+        int min_r = H[0];
         for (int i = 1; i < 256; i++) {
-            Hr[i] = Hr[i] + Hr[i-1];
-            if (min_r == 0 && Hr[i] != 0)
-                min_r = Hr[i];
+            H[0 + i] = H[0 + i] + H[0 + i-1];
+            if (min_r == 0 && H[i] != 0)
+                min_r = H[i];
         }
         min_h[0] = min_r;
     }
 
     if (idx == 1) {
-        int min_g = Hg[0];
+        int min_g = H[256];
         for (int i = 1; i < 256; i++) {
-            Hg[i] = Hg[i] + Hg[i-1];
-            if (min_g == 0 && Hg[i] != 0) 
-                min_g = Hg[i];
+            H[256 + i] = H[256 + i] + H[256 + i-1];
+            if (min_g == 0 && H[256+i] != 0) 
+                min_g = H[256+i];
         }
         min_h[1] = min_g;
     }
 
     if (idx == 2) {
-        int min_b = Hb[0];
+        int min_b = H[512];
         for (int i = 1; i < 256; i++) {
-            Hb[i] = Hb[i] + Hb[i-1];
-            if (min_b == 0 && Hb[i] != 0) 
-                min_b = Hb[i];
+            H[512 + i] = H[512 + i] + H[512 + i-1];
+            if (min_b == 0 && H[512+i] != 0) 
+                min_b = H[512+i];
         }
         min_h[2] = min_b;
     }
@@ -91,7 +91,7 @@ __global__ void cumulative_histograms(int Hr[256], int Hg[256], int Hb[256], int
 
 
 // efficient parallel scan algorithm for cumulative histograms
-__global__ void cumulative_histograms_scan(int H[3][256], int *min_h, int N)
+__global__ void cumulative_histograms_scan(int H[3*256], int *min_h, int N)
 {
     // thee blocks of 256 threads (16x16)
     int channelIdx = blockIdx.x;
@@ -100,36 +100,38 @@ __global__ void cumulative_histograms_scan(int H[3][256], int *min_h, int N)
     int lim = (int) log2(N);
     int k2 = 1;
     int k2m1 = 2;
+    int step = 2;
+
+    // upsweep phase
     for (int k = 0; k <= lim - 1; ++k) {
-        step = pow(2, k+1);
         if (idx < N - 1 && idx % step == 0) {
             // for (int i = 0; i <= N-1; i += step) {
-            H[channelIdx][idx-1+k2m1] = H[channelIdx][idx-1+k2] + H[channelIdx][idx-1+k2m1];
+            H[channelIdx * 256 + idx-1+k2m1] = H[channelIdx * 256 + idx-1+k2] + H[channelIdx * 256 + idx-1+k2m1];
         }
         k2 *= 2;
         k2m1 *= 2;
+        step *= 2;
         __syncthreads();
     }
 
     k2m1 /= 4; 
+    // downsweep phase
     for (int k = lim; k >= 1; --k) {
-        step = pow(2, k);
         if (idx < N - 1 && idx % step == 0) {
             // for (int i = 0; i <= N - 1; i += step) {
-            H[channelIdx][idx-1+k2m1+2^k] = H[channelIdx][idx-1+k2m1+k2] + H[channelIdx][idx-1+k2];
+            H[channelIdx * 256 + idx-1+k2m1+2^k] = H[channelIdx * 256 + idx-1+k2m1+k2] + H[channelIdx * 256 + idx-1+k2];
         }
         k2 /= 2;
         k2m1 /= 2;
+        step /= 2;
         __syncthreads();
     }
 }
 
 
 // can be completely parallelized
-__global__ void new_intensities(int Hr[256], int Hg[256], int Hb[256],
-                                unsigned char new_int_r[256],
-                                unsigned char new_int_g[256],
-                                unsigned char new_int_b[256],
+__global__ void new_intensities(int H[3*256],
+                                unsigned char new_int[3*256],
                                 int* min_h,
                                 int N, int M, int L)
 {
@@ -137,22 +139,13 @@ __global__ void new_intensities(int Hr[256], int Hg[256], int Hb[256],
     // one block of 256 threads (16x16)
     int idx = blockIdx.x * threadIdx.y * blockDim.x + threadIdx.x;
 
-    if (blockIdx.x == 0) 
-        new_int_r[idx] = (unsigned char) (((Hr[idx] - min_h[0]) / (N * M * min_h[0])) * (L - 1));
-
-    if (blockIdx.x == 1) 
-        new_int_g[idx] = (unsigned char) (((Hg[idx] - min_h[1]) / (N * M * min_h[1])) * (L - 1));
-
-    if (blockIdx.x == 2) 
-        new_int_b[idx] = (unsigned char) (((Hb[idx] - min_h[2]) / (N * M * min_h[2])) * (L - 1));
+    new_int[blockIdx.x * 256 + idx] = (unsigned char) (((H[blockIdx.x * 256 + idx] - min_h[blockIdx.x]) / (N * M * min_h[blockIdx.x])) * (L - 1));
 }
 
 
 // can be completely parallelized
 __global__ void assign_intensities(unsigned char *image, int height, int width, int cpp,
-                                    unsigned char int_r[256],
-                                    unsigned char int_g[256],
-                                    unsigned char int_b[256])
+                                    unsigned char intensities[3 * 256])
 {
     int gidx = blockDim.x * blockIdx.x + threadIdx.x;
     int gidy = blockDim.y * blockIdx.y + threadIdx.y;
@@ -161,9 +154,9 @@ __global__ void assign_intensities(unsigned char *image, int height, int width, 
     {
         for (int j = gidy; j < width; j += blockDim.y * gridDim.y)
         {
-            image[(i * width + j) * cpp + 0] = int_r[image[(i * width + j) * cpp + 0]];
-            image[(i * width + j) * cpp + 1] = int_r[image[(i * width + j) * cpp + 1]];
-            image[(i * width + j) * cpp + 2] = int_r[image[(i * width + j) * cpp + 2]];
+            image[(i * width + j) * cpp + 0] = intensities[image[(i * width + j) * cpp + 0]];
+            image[(i * width + j) * cpp + 1] = intensities[256 + image[(i * width + j) * cpp + 1]];
+            image[(i * width + j) * cpp + 2] = intensities[512 + image[(i * width + j) * cpp + 2]];
         }
     }
 }
@@ -202,15 +195,11 @@ int main(int argc, char *argv[])
     unsigned char *d_imageIn;
     // unsigned char *d_imageOut;
 
-    int *H_r;
-    int *H_g;
-    int *H_b;
-    const size_t histogram_size = 256 * sizeof(int);
+    int *H;
+    const size_t histogram_size = 3 * 256 * sizeof(int);
 
-    unsigned char *newIntR;
-    unsigned char *newIntG;
-    unsigned char *newIntB;
-    const size_t intensities_size = 256 * sizeof(unsigned char);
+    unsigned char *newIntensities;
+    const size_t intensities_size = 3 * 256 * sizeof(unsigned char);
 
     int *min_h;
     const size_t min_h_size = 3 * sizeof(int);
@@ -220,13 +209,9 @@ int main(int argc, char *argv[])
     // checkCudaErrors(cudaMalloc(&d_imageOut, datasize));
 
     // allocate the histograms for color channels to the device
-    checkCudaErrors(cudaMalloc(&H_r, histogram_size));
-    checkCudaErrors(cudaMalloc(&H_g, histogram_size));
-    checkCudaErrors(cudaMalloc(&H_b, histogram_size));
+    checkCudaErrors(cudaMalloc(&H, histogram_size));
 
-    checkCudaErrors(cudaMalloc(&newIntR, intensities_size));
-    checkCudaErrors(cudaMalloc(&newIntG, intensities_size));
-    checkCudaErrors(cudaMalloc(&newIntB, intensities_size));
+    checkCudaErrors(cudaMalloc(&newIntensities, intensities_size));
 
     checkCudaErrors(cudaMalloc(&min_h, min_h_size));
 
@@ -243,17 +228,17 @@ int main(int argc, char *argv[])
     dim3 blockSize(16, 16);
     dim3 gridSize((height-1)/blockSize.x+1,(width-1)/blockSize.y+1);
     // PERFORM HISTOGRAM COMPUTATION
-    compute_histograms<<<gridSize, blockSize>>>(d_imageIn, width, height, cpp, H_r, H_g, H_b);
+    compute_histograms<<<gridSize, blockSize>>>(d_imageIn, width, height, cpp, H);
 
     int numBlocks = 1;
     int numThreads = 3;
-    cumulative_histograms<<<numBlocks, numThreads>>>(H_r, H_g, H_b, min_h);
+    cumulative_histograms<<<numBlocks, numThreads>>>(H, min_h);
 
     numBlocks = 3;
     numThreads = 256;
-    new_intensities<<<numBlocks, numThreads>>>(H_r, H_g, H_b, newIntR, newIntG, newIntB, min_h, width, height, 256);
+    new_intensities<<<numBlocks, numThreads>>>(H, newIntensities, min_h, width, height, 256);
 
-    assign_intensities<<<gridSize, blockSize>>>(d_imageIn, height, width, cpp, newIntR, newIntG, newIntB);
+    assign_intensities<<<gridSize, blockSize>>>(d_imageIn, height, width, cpp, newIntensities);
 
     checkCudaErrors(cudaMemcpy(h_imageIn, d_imageIn, datasize, cudaMemcpyDeviceToHost));
     getLastCudaError("copy_image() execution failed\n");
