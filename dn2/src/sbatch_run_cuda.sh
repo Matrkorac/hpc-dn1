@@ -15,7 +15,7 @@ FILE=sample
 
 module load CUDAcore/11.2.1
 
-nvcc  -O2 -lm ${FILE}.cu -o ${FILE}
+nvcc -diag-suppress 550 -O2 -lm ${FILE}.cu -o ${FILE}
 # nvcc  -O2 -lm ${FILE}.cu -o ${FILE}
 
 ./${FILE} ../../test_images/1024x768.png ../results/1024x768_out.png

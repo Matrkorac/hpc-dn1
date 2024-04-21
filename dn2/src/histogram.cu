@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include <cuda_runtime.h>
 #include <cuda.h>
@@ -85,6 +86,43 @@ __global__ void cumulative_histograms(int Hr[256], int Hg[256], int Hb[256], int
                 min_b = Hb[i];
         }
         min_h[2] = min_b;
+    }
+}
+
+
+// efficient parallel scan algorithm for cumulative histograms
+__global__ void cumulative_histograms_scan(int H[3][256], int *min_h, int N)
+{
+    // thee blocks of 256 threads (16x16)
+    int channelIdx = blockIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int step;
+    int lim = (int) log2(N);
+    int k2 = 1;
+    int k2m1 = 2;
+    for (int k = 0; k <= lim - 1; ++k) {
+        step = pow(2, k+1);
+        if (idx % step == 0) {
+            // for (int i = 0; i <= N-1; i += step) {
+            H[channelIdx][idx-1+k2m1] = H[channelIdx][idx-1+k2] + H[channelIdx][idx-1+k2m1];
+        }
+        k2 *= 2;
+        k2m1 *= 2;
+        __syncthreads();
+    }
+
+    k2m1 /= 4; 
+    for (int k = lim; k >= 1; --k) {
+        step = pow(2, k);
+        int k2 = (int) pow(2, k);
+        int k2m1 = (int) pow(2, k-1);
+        if (idx < N - 1 && idx % step == 0) {
+            // for (int i = 0; i <= N - 1; i += step) {
+            H[channelIdx][idx-1+k2m1+2^k] = H[channelIdx][idx-1+k2m1+k2] + H[channelIdx][idx-1+k2];
+        }
+        k2 /= 2;
+        k2m1 /= 2;
+        __syncthreads();
     }
 }
 
