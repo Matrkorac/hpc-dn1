@@ -16,7 +16,7 @@
 
 __global__ void compute_histograms(const unsigned char *image,
                                     const int width, const int height, const int cpp,
-                                    int Hr[256], int Hg[256], int Hb[256])
+                                    int H[3][256])
 {
 
     int row = blockDim.x * blockIdx.x + threadIdx.x;
@@ -47,9 +47,9 @@ __global__ void compute_histograms(const unsigned char *image,
     __syncthreads();
 
     // each thread adds a single value into global memory for each histogram
-    atomicAdd(&Hr[threadIdx.x * blockDim.y + threadIdx.y], Hrs[threadIdx.x * blockDim.y + threadIdx.y]);
-    atomicAdd(&Hg[threadIdx.x * blockDim.y + threadIdx.y], Hgs[threadIdx.x * blockDim.y + threadIdx.y]);
-    atomicAdd(&Hb[threadIdx.x * blockDim.y + threadIdx.y], Hbs[threadIdx.x * blockDim.y + threadIdx.y]);
+    atomicAdd(&H[0][threadIdx.x * blockDim.y + threadIdx.y], Hrs[threadIdx.x * blockDim.y + threadIdx.y]);
+    atomicAdd(&H[0][threadIdx.x * blockDim.y + threadIdx.y], Hgs[threadIdx.x * blockDim.y + threadIdx.y]);
+    atomicAdd(&H[0][threadIdx.x * blockDim.y + threadIdx.y], Hbs[threadIdx.x * blockDim.y + threadIdx.y]);
 }
 
 
@@ -102,7 +102,7 @@ __global__ void cumulative_histograms_scan(int H[3][256], int *min_h, int N)
     int k2m1 = 2;
     for (int k = 0; k <= lim - 1; ++k) {
         step = pow(2, k+1);
-        if (idx % step == 0) {
+        if (idx < N - 1 && idx % step == 0) {
             // for (int i = 0; i <= N-1; i += step) {
             H[channelIdx][idx-1+k2m1] = H[channelIdx][idx-1+k2] + H[channelIdx][idx-1+k2m1];
         }
@@ -114,8 +114,6 @@ __global__ void cumulative_histograms_scan(int H[3][256], int *min_h, int N)
     k2m1 /= 4; 
     for (int k = lim; k >= 1; --k) {
         step = pow(2, k);
-        int k2 = (int) pow(2, k);
-        int k2m1 = (int) pow(2, k-1);
         if (idx < N - 1 && idx % step == 0) {
             // for (int i = 0; i <= N - 1; i += step) {
             H[channelIdx][idx-1+k2m1+2^k] = H[channelIdx][idx-1+k2m1+k2] + H[channelIdx][idx-1+k2];
