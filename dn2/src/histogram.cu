@@ -93,7 +93,7 @@ __global__ void cumulative_histograms(int H[3*256], int *min_h)
 // efficient parallel scan algorithm for cumulative histograms
 __global__ void cumulative_histograms_scan(int H[3*256], int *min_h, int N)
 {
-    // thee blocks of 256 threads (16x16)
+    // thee blocks of 256 threads
     int channelIdx = blockIdx.x;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int step;
@@ -102,10 +102,13 @@ __global__ void cumulative_histograms_scan(int H[3*256], int *min_h, int N)
     int k2m1 = 2;
     int step = 2;
 
+    // we have 3 * 256 threads, one thread for each index in the channel
+    // each thread lives through the whole algorithm
+    // a thread computes the final cumulative sum for each index of the given array
+
     // upsweep phase
     for (int k = 0; k <= lim - 1; ++k) {
         if (idx < N - 1 && idx % step == 0) {
-            // for (int i = 0; i <= N-1; i += step) {
             H[channelIdx * 256 + idx-1+k2m1] = H[channelIdx * 256 + idx-1+k2] + H[channelIdx * 256 + idx-1+k2m1];
         }
         k2 *= 2;
@@ -118,7 +121,6 @@ __global__ void cumulative_histograms_scan(int H[3*256], int *min_h, int N)
     // downsweep phase
     for (int k = lim; k >= 1; --k) {
         if (idx < N - 1 && idx % step == 0) {
-            // for (int i = 0; i <= N - 1; i += step) {
             H[channelIdx * 256 + idx-1+k2m1+2^k] = H[channelIdx * 256 + idx-1+k2m1+k2] + H[channelIdx * 256 + idx-1+k2];
         }
         k2 /= 2;
@@ -136,10 +138,10 @@ __global__ void new_intensities(int H[3*256],
                                 int N, int M, int L)
 {
     // can have three blocks; one for each color channel
-    // one block of 256 threads (16x16)
+    // one block of 256 threads
     int idx = blockIdx.x * threadIdx.y * blockDim.x + threadIdx.x;
 
-    new_int[blockIdx.x * 256 + idx] = (unsigned char) (((H[blockIdx.x * 256 + idx] - min_h[blockIdx.x]) / (N * M * min_h[blockIdx.x])) * (L - 1));
+    new_int[blockIdx.x * 256 + idx] = (unsigned char) (((H[idx] - min_h[blockIdx.x]) / (N * M * min_h[blockIdx.x])) * (L - 1));
 }
 
 
@@ -150,6 +152,9 @@ __global__ void assign_intensities(unsigned char *image, int height, int width, 
     int gidx = blockDim.x * blockIdx.x + threadIdx.x;
     int gidy = blockDim.y * blockIdx.y + threadIdx.y;
 
+    // each thread assigns new intensities for all three color channels
+    // for thread assigns WIDTH / (BLOCKDIM.X * GRIDIM.X)
+    // for gridSize(3, 3) and blockSize(16, 16) we get --> WIDTH / (3 * 16)
     for (int i = gidx; i < height; i += blockDim.x * gridDim.x)
     {
         for (int j = gidy; j < width; j += blockDim.y * gridDim.y)
@@ -234,9 +239,9 @@ int main(int argc, char *argv[])
     // int numThreads = 3;
     // cumulative_histograms<<<numBlocks, numThreads>>>(H, min_h);
 
-    dim3 blockSize(16, 16);
+    dim3 blockSize(256);
     dim3 gridSize(3);
-    cumulative_histograms_scan<<<blockSize, gridSize>>>(H, min_h, 256);
+    cumulative_histograms_scan<<<gridSize, blockSize>>>(H, min_h, 256);
 
     new_intensities<<<gridSize, blockSize>>>(H, newIntensities, min_h, width, height, 256);
 
