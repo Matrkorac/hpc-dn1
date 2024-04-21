@@ -230,18 +230,22 @@ int main(int argc, char *argv[])
     // PERFORM HISTOGRAM COMPUTATION
     compute_histograms<<<gridSize, blockSize>>>(d_imageIn, width, height, cpp, H);
 
-    int numBlocks = 1;
-    int numThreads = 3;
-    cumulative_histograms<<<numBlocks, numThreads>>>(H, min_h);
+    // int numBlocks = 1;
+    // int numThreads = 3;
+    // cumulative_histograms<<<numBlocks, numThreads>>>(H, min_h);
 
-    numBlocks = 3;
-    numThreads = 256;
-    new_intensities<<<numBlocks, numThreads>>>(H, newIntensities, min_h, width, height, 256);
+    dim3 blockSize(16, 16);
+    dim3 gridSize(3);
+    cumulative_histograms_scan<<<blockSize, gridSize>>>(H, min_h, 256);
 
+    new_intensities<<<gridSize, blockSize>>>(H, newIntensities, min_h, width, height, 256);
+
+    dim3 blockSize(16, 16);
+    dim3 gridSize((height-1)/blockSize.x+1,(width-1)/blockSize.y+1);
     assign_intensities<<<gridSize, blockSize>>>(d_imageIn, height, width, cpp, newIntensities);
 
     checkCudaErrors(cudaMemcpy(h_imageIn, d_imageIn, datasize, cudaMemcpyDeviceToHost));
-    getLastCudaError("copy_image() execution failed\n");
+    getLastCudaError("histogram_normalization execution failed\n");
     cudaEventRecord(stop);
 
     cudaEventSynchronize(stop);
@@ -273,12 +277,8 @@ int main(int argc, char *argv[])
 
     // Free device memory
     checkCudaErrors(cudaFree(d_imageIn));
-    checkCudaErrors(cudaFree(H_r));
-    checkCudaErrors(cudaFree(H_g));
-    checkCudaErrors(cudaFree(H_b));
-    checkCudaErrors(cudaFree(newIntR));
-    checkCudaErrors(cudaFree(newIntG));
-    checkCudaErrors(cudaFree(newIntB));
+    checkCudaErrors(cudaFree(H));
+    checkCudaErrors(cudaFree(newIntensities));
     checkCudaErrors(cudaFree(min_h));
 
     // Clean-up events
